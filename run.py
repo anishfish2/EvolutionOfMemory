@@ -8,32 +8,38 @@ import sc2
 import neat
 from neatBot import NEATBot
 
-
-
 import time
 
 
 
-def evaluate_genome(genome, config):
-    bot = NEATBot(genome, config)
+def evaluate_genome(genomes, config):
+    for genome_id, genome in genomes:
+        bot = NEATBot(genome, config)
+        
+        run_game(maps.get("AbyssalReefLE"), [
+        Bot(Race.Zerg, bot),
+        Computer(Race.Protoss, Difficulty.Easy)
+        ], realtime=False)
 
-    run_game(maps.get("AbyssalReefLE"), [
-    Bot(Race.Zerg, bot),
-    Computer(Race.Protoss, Difficulty.Easy)
-    ], realtime=True)
+        fitness = bot.calculate_fitness()
+        print(f"Genome fitness: {fitness}")
 
-    fitness = bot.calculate_fitness()
-    
-    return fitness
+        genome.fitness = fitness
 
 config_path = 'neat_config.ini'
 config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
-                     neat.DefaultSpeciesSet, neat.DefaultStagnation,
-                     config_path)
+                    neat.DefaultSpeciesSet, neat.DefaultStagnation,
+                    config_path)
+
 
 # Create the NEAT population
 population = neat.Population(config)
 
+# example_genome_id, example_genome = next(iter(population.population.items()))
 # Run the NEAT algorithm
-genome = neat.DefaultGenome(100)
-winner = population.run(evaluate_genome(genome, config), 100)
+# genome = neat.DefaultGenome(100)
+# evaluate_genome(genome, config)
+
+winner = population.run(evaluate_genome, 100)
+
+# evaluate_genome(genome, config)

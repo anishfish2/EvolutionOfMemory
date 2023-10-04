@@ -4,12 +4,15 @@ from sc2.player import Bot, Computer
 from sc2.main import run_game
 from sc2.data import Race, Difficulty
 from sc2.bot_ai import BotAI
+from sc2.position import Point2
 
-
+import numpy as np 
 import neat
 config_path = 'neat_config.ini'
 
 import time
+
+import random
 
 # Current Prey Bot: NEAT implementation to mine minerals
 class NEATBot(BotAI):
@@ -18,25 +21,40 @@ class NEATBot(BotAI):
         self.genome = genome
         self.config = config
         self.net = neat.nn.FeedForwardNetwork.create(self.genome, self.config)
-        self.minerals_gathered = 0  # Track the total minerals gathered
-        self.gathering_started = 0 # Track the total minerals started
+        self.mined_mineral_fields = set()
+        self.food_crumbs = set()
         self.tag_to_worker = {}
-        self.step_interval = 2  # Print reward every x frames (steps)
-        self.last_step_time = 0
-
-    # Intercept the creation of new units, including minerals
-    async def on_unit_created(self, unit):
-        if unit.type_id == sc2.UnitTypeId.MINERALFIELD:
-            if self.infinite_minerals:
-                unit.minerals = 20000  # Set to a large value to simulate infinite minerals
-
+        self.max_energy = 100  # Set the maximum energy level
+        self.current_energy = self.max_energy  # Initialize current energy level
+        self.start_time = None
+        self.observation_range = 100
+        self.movement_speed = 10
+        self.worker_x = None
+        self.worker_y = None
+    
     async def on_step(self, iteration):
 
+        if iteration == 0:
+            self.start_time = time.time()
+
+            
+        if self.current_energy <= 0:
+            # print("Bot's energy is depleted. Ending the run.")
+            await self.end_game()  # Using await to call the asynchronous function
+            
+            return
+        
+        # Decrease current energy
+        self.current_energy = self.current_energy - .1
+
+        # Pick one worker to be prey
         if 'my_worker' not in self.tag_to_worker:
             worker = self.workers.random
             if worker:
                 self.tag_to_worker['my_worker'] = worker
-
+                self.worker_x = worker.position.x
+                self.worker_y = worker.position.y
+        
         for worker in self.workers:
             if worker.tag != self.tag_to_worker.get('my_worker', None):
                 # Stop command to stop all non selected worker current actions
@@ -46,63 +64,133 @@ class NEATBot(BotAI):
         # Code for selected worker
         if 'my_worker' in self.tag_to_worker:
             worker = self.tag_to_worker['my_worker']
-            # Provide observation input to the neural network for the selected worker
+
+            # Provide observation input to the neural network
             observation_input = self.get_observation_input()
 
             # Use the neural network to decide whether to mine minerals
             action = self.net.activate(observation_input)
 
-            print(action)
+            select_action = np.argmax(np.array(action))
 
-            # If the neural network decides to mine, issue a gather command
-
-            print(f"Reward Before: {self.calculate_fitness()}")
-
-            if action[0] >= 0.0:  # Adjust the threshold as needed
-                mineral_patch = self.mineral_field.closest_to(worker)
-                worker.gather(mineral_patch)
-                print("Gathered Materials")
+            # Generate random action if network says nothing
+            print("Action:", action)
+            if sum(action) == 0:
+                select_action = random.randint(0, 9)
             
-            print(f"Reward Action: {self.calculate_fitness()}")
+            print(select_action)
+            print("Observation:", observation_input)
+            if select_action == 10:
+                print("Energy", self.current_energy)
+                print("Action:", select_action)
+            print(worker.position)
+            print(self.worker_x, self.worker_y)
+            if select_action == 0:  # Move up
+                worker.move(Point2((self.worker_x, self.worker_y + self.movement_speed)))
+                self.worker_y += self.movement_speed
+                
+            elif select_action == 1:  # Move down
+                worker.move(Point2((self.worker_x, self.worker_y - self.movement_speed)))
+                self.worker_y -= self.movement_speed
+                
+            elif select_action == 2:  # Move left
+                worker.move(Point2((self.worker_x - self.movement_speed, self.worker_y)))
+                self.worker_x -= self.movement_speed
+                
+            elif select_action == 3:  # Move right
+                worker.move(Point2((self.worker_x + self.movement_speed, self.worker_y)))
+                self.worker_x += self.movement_speed
+                
+            elif select_action == 4:  # Move diagonally up-left
+                worker.move(Point2((self.worker_x - self.movement_speed, self.worker_y + self.movement_speed)))
+                self.worker_x -= self.movement_speed
+                self.worker_y += self.movement_speed
+                
+            elif select_action == 5:  # Move diagonally up-right
+                worker.move(Point2((self.worker_x + self.movement_speed, self.worker_y + self.movement_speed)))
+                self.worker_x += self.movement_speed
+                self.worker_y += self.movement_speed
+                
+            elif select_action == 6:  # Move diagonally down-left
+                worker.move(Point2((self.worker_x - self.movement_speed, self.worker_y - self.movement_speed)))
+                self.worker_x -= self.movement_speed
+                self.worker_y -= self.movement_speed
+                
+            elif select_action == 7:  # Move diagonally down-right
+                worker.move(Point2((self.worker_x + self.movement_speed, self.worker_y - self.movement_speed)))
+                self.worker_x += self.movement_speed
+                self.worker_y -= self.movement_speed
+            print(self.worker_x, self.worker_y)
 
-        
+            # elif select_action == 8:
+            #     available_mineral_patches = [mineral_patch for mineral_patch in self.mineral_field if mineral_patch.tag not in self.mined_mineral_fields and mineral_patch.distance_to(worker.position) <= self.observation_range]
+            
+            #     if available_mineral_patches:
+            #         # Choose the closest available mineral patch
+            #         mineral_patch = min(available_mineral_patches, key=lambda patch: patch.distance_to(worker.position))
+                    
+            #         # Gather from the chosen mineral patch
+            #         worker.gather(mineral_patch)
+                    
+            #         if worker.distance_to(mineral_patch) < 5.0:  # Adjust the threshold distance
+
+            #             # Add the mineral patch to the set of mined fields
+            #             self.mined_mineral_fields.add(mineral_patch.tag)
+            #             self.current_energy += 5
+            #             print("Gathered Materials")
+            #         else:
+            #             print("Too far from the mineral patch")    
+            # elif select_action == 9: #Place Food Dropper
+            #     print("Placing Dropper")
+            #     self.food_crumbs.add(Point2((worker.position.x, worker.position.y)))
+                    
 
     def calculate_fitness(self):
-        # Calculate the time it took for gathering
-        gathering_time = self.time - self.gathering_started
+        '''
+            Calculate fitness for genome
 
-        # Calculate the fitness based on minerals gathered and gathering time
-        # Adjust the weights and formula as needed for your specific fitness criteria
-        fitness = self.minerals_gathered - gathering_time * 0.01
+            Returns: Custom formula involving time stayed alive and food eaten
+        '''
+        
+        time_alive = time.time() - self.start_time
+
+        fitness = time_alive
 
         return fitness
     
     def get_observation_input(self):
-        observation_input = []
+        '''
+            Get observation input for the prey.
 
-        # Define the observation range (e.g., within 10 units)
-        observation_range = 10
+            This method collects information about mineral patches and other game objects
+            within a specified observation range from the selected worker.
+
+            Returns:
+                List: Observation input containing information about game objects. 0, 1 for [Mineral, Mineral Dropper, Enemy, Enemy Dropper]
+        '''
+        observation_input = np.array([0, 0, 0, 0])
+
+        
 
         # Get the position of the selected worker
         worker_position = self.tag_to_worker['my_worker'].position
 
         # Loop through mineral patches and include them in the observation if they are within range
         for mineral_patch in self.mineral_field:
-            if mineral_patch.distance_to(worker_position) <= observation_range:
-                # Add information about mineral patches within range
-                observation_input.append(mineral_patch.position.x)
-                observation_input.append(mineral_patch.position.y)
+            if mineral_patch.distance_to(worker_position) <= self.observation_range and mineral_patch.tag not in self.mined_mineral_fields:
+                observation_input[0] = 1
 
-        # Add information about other game objects within range (e.g., enemies, buildings)
-        for unit in self.units:
-            if unit.distance_to(worker_position) <= observation_range and unit != self.tag_to_worker['my_worker']:
-                # Add information about the unit within range
-                observation_input.append(unit.position.x)
-                observation_input.append(unit.position.y)
-
-        # Ensure the observation input has a fixed size by padding with zeros if necessary
-        observation_size = 100  # Define the desired observation size
-        while len(observation_input) < observation_size:
-            observation_input.append(0.0)
-
+        for food_crumb in self.food_crumbs:
+            if food_crumb.distance_to(worker_position) <= self.observation_range:
+                observation_input[1] = 1
+        
         return observation_input
+    
+    async def end_game(self):
+        print("Ending the game")
+        await self.leave_game()
+    async def leave_game(self):
+        try:
+            await self.client.leave()
+        except Exception as e:
+            print(f"Error leaving the game: {e}")
