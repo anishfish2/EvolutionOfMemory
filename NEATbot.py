@@ -8,6 +8,7 @@ from sc2.position import Point2
 
 import numpy as np 
 import neat
+
 config_path = 'neat_config.ini'
 
 import time
@@ -31,12 +32,26 @@ class NEATBot(BotAI):
         self.movement_speed = 10
         self.worker_x = None
         self.worker_y = None
-    
-    async def on_step(self, iteration):
+        self.starting_base_position = None
 
+    async def find_starting_base(self):
+        for unit in self.units:
+            if unit.type_id in {sc2.constants.UnitTypeId.COMMANDCENTER, sc2.constants.UnitTypeId.NEXUS, sc2.constants.UnitTypeId.HATCHERY}:
+                print("Found starting base at:", unit.position)
+                self.starting_base_position = unit.position
+                break
+
+    async def set_mineral_values(self):
+        for unit in self.units:
+            if unit.type_id == sc2.constants.UnitTypeId.MINERALFIELD:
+                self.do(unit.tag_set(sc2.ControlGroup(1)))
+
+    async def on_step(self, iteration):
+        
         if iteration == 0:
             self.start_time = time.time()
-
+            await self.find_starting_base()
+            await self.set_mineral_values()
             
         if self.current_energy <= 0:
             # print("Bot's energy is depleted. Ending the run.")
@@ -65,6 +80,27 @@ class NEATBot(BotAI):
         if 'my_worker' in self.tag_to_worker:
             worker = self.tag_to_worker['my_worker']
 
+            # Check if the worker is close to an unmined mineral
+            print("#num existing mineral fields", len(self.mineral_field))
+            close_minerals = [mineral_patch for mineral_patch in self.mineral_field if mineral_patch.tag not in self.mined_mineral_fields and mineral_patch.distance_to(worker.position) <= 1000]
+
+            print("# minerals closeby:", len(close_minerals))
+            if close_minerals:
+                # Worker is close to a mineral, start mining
+                mineral_to_mine = close_minerals[0]
+                worker.gather(mineral_to_mine)
+                
+                # Once the mineral is mined, update the set
+                if worker.is_carrying_minerals:
+                    self.mined_mineral_fields.add(mineral_to_mine.tag)
+
+                # Skip the rest of the logic for this iteration
+                return
+
+            if worker.is_carrying_minerals:
+                worker.move(self.starting_base_position)
+                return
+            
             # Provide observation input to the neural network
             observation_input = self.get_observation_input()
 
@@ -73,18 +109,9 @@ class NEATBot(BotAI):
 
             select_action = np.argmax(np.array(action))
 
-            # Generate random action if network says nothing
-            print("Action:", action)
             if sum(action) == 0:
                 select_action = random.randint(0, 9)
-            
-            print(select_action)
-            print("Observation:", observation_input)
-            if select_action == 10:
-                print("Energy", self.current_energy)
-                print("Action:", select_action)
-            print(worker.position)
-            print(self.worker_x, self.worker_y)
+
             if select_action == 0:  # Move up
                 worker.move(Point2((self.worker_x, self.worker_y + self.movement_speed)))
                 self.worker_y += self.movement_speed
@@ -120,31 +147,8 @@ class NEATBot(BotAI):
                 worker.move(Point2((self.worker_x + self.movement_speed, self.worker_y - self.movement_speed)))
                 self.worker_x += self.movement_speed
                 self.worker_y -= self.movement_speed
-            print(self.worker_x, self.worker_y)
-
-            # elif select_action == 8:
-            #     available_mineral_patches = [mineral_patch for mineral_patch in self.mineral_field if mineral_patch.tag not in self.mined_mineral_fields and mineral_patch.distance_to(worker.position) <= self.observation_range]
             
-            #     if available_mineral_patches:
-            #         # Choose the closest available mineral patch
-            #         mineral_patch = min(available_mineral_patches, key=lambda patch: patch.distance_to(worker.position))
-                    
-            #         # Gather from the chosen mineral patch
-            #         worker.gather(mineral_patch)
-                    
-            #         if worker.distance_to(mineral_patch) < 5.0:  # Adjust the threshold distance
-
-            #             # Add the mineral patch to the set of mined fields
-            #             self.mined_mineral_fields.add(mineral_patch.tag)
-            #             self.current_energy += 5
-            #             print("Gathered Materials")
-            #         else:
-            #             print("Too far from the mineral patch")    
-            # elif select_action == 9: #Place Food Dropper
-            #     print("Placing Dropper")
-            #     self.food_crumbs.add(Point2((worker.position.x, worker.position.y)))
-                    
-
+            print("Action", select_action, "Energy:", self.current_energy, "X", self.worker_x, "Y:", self.worker_y)
     def calculate_fitness(self):
         '''
             Calculate fitness for genome
@@ -154,7 +158,7 @@ class NEATBot(BotAI):
         
         time_alive = time.time() - self.start_time
 
-        fitness = time_alive
+        fitness = time_alive + len(self.mined_mineral_fields)
 
         return fitness
     
@@ -166,29 +170,81 @@ class NEATBot(BotAI):
             within a specified observation range from the selected worker.
 
             Returns:
-                List: Observation input containing information about game objects. 0, 1 for [Mineral, Mineral Dropper, Enemy, Enemy Dropper]
+                List: Observation input containing information about game objects. 0, 1 for [Mineral Sensor 1, Mineral Sensor 2,...,Mineral Sensor 8, Dropper Sensor 1, Dropper Sensor 2,..., Dropper Sensor 8]
         '''
-        observation_input = np.array([0, 0, 0, 0])
-
-        
+        observation_input = np.zeros(16)  # Initialize the array with zeros
 
         # Get the position of the selected worker
         worker_position = self.tag_to_worker['my_worker'].position
 
-        # Loop through mineral patches and include them in the observation if they are within range
-        for mineral_patch in self.mineral_field:
-            if mineral_patch.distance_to(worker_position) <= self.observation_range and mineral_patch.tag not in self.mined_mineral_fields:
-                observation_input[0] = 1
+        # Define the directions for the 8 sensors
+        directions = [
+            (1, 0),   # Right
+            (0, 1),   # Up
+            (-1, 0),  # Left
+            (0, -1),  # Down
+            (1, 1),   # Up-Right
+            (-1, 1),  # Up-Left
+            (-1, -1), # Down-Left
+            (1, -1)   # Down-Right
+        ]
 
-        for food_crumb in self.food_crumbs:
-            if food_crumb.distance_to(worker_position) <= self.observation_range:
-                observation_input[1] = 1
-        
+        # Loop through directions and include objects in the observation if they intersect the line
+        for i, direction in enumerate(directions):
+            dx, dy = direction
+            sensor_position = worker_position + Point2((dx * self.observation_range, dy * self.observation_range))
+
+            # Use Bresenham's Line Algorithm to iterate through the cells along the line
+            x0, y0 = int(worker_position.x), int(worker_position.y)
+            x1, y1 = int(sensor_position.x), int(sensor_position.y)
+
+            steep = abs(y1 - y0) > abs(x1 - x0)
+            if steep:
+                x0, y0 = y0, x0
+                x1, y1 = y1, x1
+
+            if x0 > x1:
+                x0, x1 = x1, x0
+                y0, y1 = y1, y0
+
+            deltax = x1 - x0
+            deltay = abs(y1 - y0)
+            error = deltax / 2
+            y = y0
+            ystep = None
+
+            if y0 < y1:
+                ystep = 1
+            else:
+                ystep = -1
+
+            for x in range(x0, x1 + 1):
+                if steep:
+                    cell_position = Point2((y, x))
+                else:
+                    cell_position = Point2((x, y))
+
+                # Check if any mineral patches are present in the current cell
+                for mineral_patch in self.mineral_field:
+                    if mineral_patch.distance_to(cell_position) <= 1 and mineral_patch.tag not in self.mined_mineral_fields:
+                        observation_input[i] = 1  # Set the corresponding sensor value to 1 for minerals
+
+                # Check if any food crumbs are present in the current cell
+                for food_crumb in self.food_crumbs:
+                    if food_crumb.distance_to(cell_position) <= 1:
+                        observation_input[i + 8] = 1  # Set the corresponding sensor value to 1 for droppers
+
+                error -= deltay
+                if error < 0:
+                    y += ystep
+                    error += deltax
+
         return observation_input
     
     async def end_game(self):
         print("Ending the game")
         await self.leave_game()
+
     async def leave_game(self):
         try:
             await self.client.leave()

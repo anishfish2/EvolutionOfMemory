@@ -12,12 +12,12 @@ import time
 
 
 
-def evaluate_genome(genomes, config):
-    for genome_id, genome in genomes:
+def evaluate_genome(genome, config):
+    # for genome_id, genome in genomes:
         bot = NEATBot(genome, config)
         
-        run_game(maps.get("AbyssalReefLE"), [
-        Bot(Race.Zerg, bot),
+        run_game(maps.get("NEATmap"), [
+        Bot(Race.Protoss, bot),
         Computer(Race.Protoss, Difficulty.Easy)
         ], realtime=False)
 
@@ -33,13 +33,13 @@ config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
 
 
 # Create the NEAT population
-population = neat.Population(config)
+# population = neat.Population(config)
 
 # example_genome_id, example_genome = next(iter(population.population.items()))
 # Run the NEAT algorithm
-# genome = neat.DefaultGenome(100)
-# evaluate_genome(genome, config)
+genome = neat.DefaultGenome(100)
+evaluate_genome(genome, config)
 
-winner = population.run(evaluate_genome, 100)
+# winner = population.run(evaluate_genome, 100)
 
 # evaluate_genome(genome, config)
