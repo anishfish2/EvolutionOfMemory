@@ -1,3 +1,7 @@
+from sc2.position import Point2
+from sc2.bot_ai import BotAI
+import sc2
+import asyncio
 # Dummy Bot: Moves to center
 class moveBotCenter(BotAI):
     def __init__(self):
@@ -22,3 +26,4 @@ class moveBotCenter(BotAI):
             worker = self.tag_to_worker['my_worker']
             target_position = self.game_info.map_center 
             worker.move(target_position)
+            print(worker.orders)
