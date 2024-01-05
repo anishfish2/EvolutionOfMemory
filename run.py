@@ -8,14 +8,15 @@ import sc2
 import neat
 from neat.six_util import iteritems, itervalues
 from neatBot import NEATBot
-from centerBot import moveBotCenter 
+from centerBot import moveBotCenter
+from neatCenterBot import neatCenterBot
 import time
 
 
 
 def evaluate_genome(genome, config):
     # for genome_id, genome in genomes:
-        bot = NEATBot(genome, config)
+        bot = neatCenterBot(genome, config)
         
         run_game(maps.get("NEATmap"), [
         Bot(Race.Protoss, bot),
@@ -89,7 +90,7 @@ def main():
     num_preys = 1
     generations = 5 
 
-    config_path = 'neat_config.ini'
+    config_path = 'center_neat_config.ini'
     config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
                     neat.DefaultSpeciesSet, neat.DefaultStagnation,
                     config_path)

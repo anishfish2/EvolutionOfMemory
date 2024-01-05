@@ -10,6 +10,7 @@ from neat.six_util import iteritems, itervalues
 from neatBot import NEATBot
 from centerBot import moveBotCenter 
 from workingBot import workingBot
+from neatCenterBot import neatCenterBot
 import time
 
 
